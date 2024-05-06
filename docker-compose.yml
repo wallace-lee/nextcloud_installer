@@ -1,0 +1,129 @@
+---
+version: '3'
+
+services:
+  nextcloud:
+    image: nextcloud
+    container_name: nextcloud
+    restart: unless-stopped
+    networks: 
+      - cloud
+    depends_on:
+      - nextclouddb
+      - redis
+    ports:
+      - 8081:80
+    volumes:
+      - ./html:/var/www/html
+      -  /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Asia/Kuala_Lumpur
+      - MYSQL_DATABASE=nextcloud
+      - MYSQL_USER=nextcloud
+      - MYSQL_PASSWORD=dbpassword
+      - MYSQL_HOST=nextclouddb.cloud
+      - REDIS_HOST=redis.cloud
+
+  nextclouddb:
+    image: mariadb
+    container_name: nextcloud-db
+    restart: unless-stopped
+    command: --transaction-isolation=READ-COMMITTED --binlog-format=ROW
+    networks: 
+      - cloud
+    volumes:
+      - ./nextclouddb:/var/lib/mysql
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Asia/Kuala_Lumpur
+      - MYSQL_RANDOM_ROOT_PASSWORD=true
+      - MYSQL_PASSWORD=dbpassword
+      - MYSQL_DATABASE=nextcloud
+      - MYSQL_USER=nextcloud
+      
+  collabora:
+    image: collabora/code
+    container_name: collabora
+    restart: unless-stopped
+    networks: 
+      - cloud
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Asia/Kuala_Lumpur
+      - password=password
+      - username=nextcloud
+      - domain=example.com
+      - extra_params=--o:ssl.enable=true
+    ports:
+      - 9980:9980
+
+  redis:
+    image: redis:alpine
+    container_name: redis
+    volumes:
+      - ./redis:/data  
+    networks: 
+      - cloud
+
+  nginx-cert:
+    image: nginx
+    container_name: nginx-cert
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Asia/Kuala_Lumpur
+    restart: no
+    volumes:
+      - ./cert:/cert
+    command: >
+       bash -c 'apt update && apt install -y openssl; if [[ ! -f /cert/cert.pem ]] || [[ ! -f /cert/key.pem ]] ; then openssl req -x509 -sha256 -nodes -days 3650 -subj "/emailAddress=admin@intel.com, CN=hec.intel.com, C=MY" -newkey rsa:2048 -keyout /cert/key.pem -out /cert/cert.pem; fi'
+    networks: 
+      - cloud
+  
+  nginx-proxy:
+    #image: 'jc21/nginx-proxy-manager:latest'
+    image: nginx
+    container_name: nginx-proxy
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Asia/Kuala_Lumpur
+    restart: unless-stopped
+    ports:
+      - '9090:80'
+      #- '81:81'
+      - '443:443'
+    volumes:
+      #- ./nginx_data:/data
+      #- ./letsencrypt:/etc/letsencrypt
+      - ./nginx_data:/etc/nginx/conf.d
+      - ./cert:/root/cert
+    depends_on:
+      - nginx-cert
+    networks: 
+      - cloud
+
+  nextcloud-appapi-server:
+    image: ghcr.io/cloud-py-api/nextcloud-appapi-dsp:release
+    container_name: nextcloud-appapi-dsp
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Asia/Kuala_Lumpur
+      - NC_HAPROXY_PASSWORD=Intel@12345678
+    restart: unless-stopped
+    depends_on: 
+      - nextcloud
+    volumes:
+      -  /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - cloud
+
+networks:
+  cloud:
+    name: cloud
+    driver: bridge
